@@ -21,7 +21,7 @@ extern "C" int rom_phy_get_vdd33();
 
 #include <TimeLib.h>
 
-#define VERSION        "esp32-0.2.0-1"
+#define VERSION        "esp32-0.2.0-2"
 
 #define MAX_OW_DEVICES 10
 
@@ -43,19 +43,20 @@ extern "C" int rom_phy_get_vdd33();
 #define D8             5
 
 #define PIN_WAKE_UP    D0
+#define PIN_POWER_ADC  36
 
 /**
  * Pin layout.
  */
-volatile int PIN_RELAY   = D1;
-volatile int PIN_SDA     = D2;
-volatile int PIN_DS20B18 = D3; // 10k pull-up (?)
-volatile int PIN_SWITCH  = D4; // Need 10k pull-up
+volatile int PIN_SDA     = D1;
+volatile int PIN_SCL     = D2;
+volatile int PIN_DS20B18 = D3; // Need 1k pull-up
+volatile int PIN_SWITCH  = D4; // Need 100 pull-up
 
 volatile int PIN_PIR     = D5;
-volatile int PIN_SCL     = D6;
-volatile int PIN_POWER   = D7; 
-volatile int PIN_PWM     = D8; // 10k pull-down (?)
+volatile int PIN_RELAY   = D6;
+volatile int PIN_POWER   = D7;
+volatile int PIN_PWM     = D8;
 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -166,7 +167,6 @@ void IRAM_ATTR updatePWM() {
         if (pwmTargetPower < pwmCurrentPower) {
             pwmCurrentPower -= 1;
         }
-        portEXIT_CRITICAL_ISR(&timerMux);  
 
         if (pwmCurrentPower <= 0) {
             ledcWrite(PWM_CHANNEL, 0);
@@ -175,6 +175,7 @@ void IRAM_ATTR updatePWM() {
         } else {
             ledcWrite(PWM_CHANNEL, pwmCurrentPower);
         }
+        portEXIT_CRITICAL_ISR(&timerMux);  
 
         if (pwmTargetPower != -1) {
             if (pirState == 1) {
@@ -311,6 +312,7 @@ void setup(){
     /**
      * Examine reset reason for CPUs.
      */
+    Serial.println();
     printResetReason(1); printResetReason(0);
     Serial.println();
 
@@ -338,9 +340,9 @@ void setup(){
     digitalWrite(PIN_POWER, HIGH);
     attachInterrupt(PIN_PIR, handlePirPin, CHANGE);
 
-    hw_timer_t * timer = timerBegin(0, 8000000, true);
+    hw_timer_t * timer = timerBegin(0, 80, true);
     timerAttachInterrupt(timer, &updatePWM, true);
-    timerAlarmWrite(timer, 100, true);
+    timerAlarmWrite(timer, 5000, true);
     timerAlarmEnable(timer);
 
     /**
@@ -348,7 +350,7 @@ void setup(){
      */
     oneWireBus = OneWire(PIN_DS20B18);
     sensors = DallasTemperature(&oneWireBus);
-    sensors.begin();    
+    sensors.begin();
 }
 
 /**
@@ -496,10 +498,12 @@ void handleSensors() {
         return;
     }
 
+    Serial.println("");
+    Serial.println("");
     Serial.println("Handle sensors");
-
-    String vcc = String(rom_phy_get_vdd33());
-
+    String vcc = String(analogRead(PIN_POWER_ADC));
+    Serial.println("VCC measurement: " + vcc);
+  
     HTTPClient http;
     http.useHTTP10(true);
     http.setTimeout(8000);
@@ -510,10 +514,9 @@ void handleSensors() {
     String NODE_KEY = nodeKeyByDeviceId();
     if (String("not-found-node-key") != NODE_KEY) {
         http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/vcc/" + vcc);
-        Serial.println("Sent 'vcc': " + String(http.GET()));
+        Serial.println("Status code of 'vcc': " + String(http.GET()));
         http.end();
     }
-    
 
     /**
      * Initiate the DS20B18 sensors.
@@ -528,11 +531,14 @@ void handleSensors() {
 
 
     /**
-     * Initiate the BME280 sensor.
+     * Initiate the BME280 sensor with power.
      */
     digitalWrite(PIN_POWER, HIGH);
     delay(5);
 
+    /**
+     * Start measurements.
+     */
     Wire.begin(PIN_SDA, PIN_SCL);
     uint8_t chipID = BME280.readChipId();
     Serial.print("ChipID = 0x");
@@ -547,13 +553,10 @@ void handleSensors() {
     BME280.writeOversamplingPressure(os16x);
     BME280.writeOversamplingTemperature(os16x);
     BME280.writeOversamplingHumidity(os16x);
-
     BME280.writeMode(smForced);
 
     int result = repeatedBMERead();
-
     BME280.writeMode(smNormal);
-
     digitalWrite(PIN_POWER, LOW);
 
     if (result == 0) {
@@ -561,20 +564,19 @@ void handleSensors() {
         return;
     }
 
-    Serial.println("Temperature  " + String(temp));
-    Serial.println("Humidity     " + String(humidity));
-    Serial.println("Pressure     " + String(pressure));
-
+    Serial.println("Temperature:  " + String(temp));
     http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/temperature/" + String(temp));
-    Serial.println("Sent 'temperature': " + String(http.GET()));
+    Serial.println("Status code of 'temperature': " + String(http.GET()));
     http.end();
 
+    Serial.println("Humidity:     " + String(humidity));
     http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/pressure/" + String(pressure));
-    Serial.println("Sent 'pressure': " + String(http.GET()));
+    Serial.println("Status code of 'pressure': " + String(http.GET()));
     http.end();
 
+    Serial.println("Pressure:     " + String(pressure));
     http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/humidity/" + String(humidity));
-    Serial.println("Sent 'humidity': " + String(http.GET()));
+    Serial.println("Status code of 'humidity': " + String(http.GET()));
     http.end();
 }
 
@@ -585,11 +587,13 @@ void handleSensors() {
 int repeatedBMERead() {
     for (int i = 0; i < 10; i++) {
         Serial.print("Measuring...");
-        
-        delay(100);
-        while (BME280.isMeasuring()) {
-          Serial.print(".");delay(10);
+
+        int measuring;
+        do {
+            Serial.print(".");delay(10);
+            measuring = BME280.isMeasuring();
         }
+        while (measuring);
 
         Serial.print(" reading... ");
         BME280.readMeasurements();
@@ -606,7 +610,7 @@ int repeatedBMERead() {
             return 1;
         }
 
-        Serial.println("repeating.");
+        Serial.println("failed. Repeating (" + String(i + 1) + "/10).");
         delay(10);
     }
 
@@ -625,11 +629,11 @@ void sendTemperature(DeviceAddress address, String vcc) {
 
     String NODE_KEY = nodeKeyByAddress(addressToString(address));
     http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/vcc/" + vcc);
-    Serial.println("Sent 'vcc': " + String(http.GET()));
+    Serial.println("Status code of 'vcc': " + String(http.GET()));
     http.end();
 
     http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/temperature/" + String(temp));
-    Serial.println("Sent 'temperature': " + String(http.GET()));
+    Serial.println("Status code of 'temperature': " + String(http.GET()));
     http.end();
 }
 
@@ -644,7 +648,7 @@ float getTemperature(DeviceAddress address) {
     do {
         temp = sensors.getTempC(address);
         delay((counter++) * 10);
-    } while ((temp == 85.0 || temp == (-127.0)) && counter < 10);
+    } while ((temp == 85.0 || temp == (-127.0)) && counter < 10);    
     Serial.println("Temperature of '" + addressToString(address) + "': " + String(temp));
 
     return temp;
@@ -680,8 +684,6 @@ String nodeKeyByAddress(String address) {
  * Discover DS18B20 devices.
  */
 int discoverOneWireDevices(DeviceAddress deviceAddresses[], int maxDevices) {
-    Serial.println("Looking for 1-Wire devices...");
-
     byte addr[8];
     int count = 0;
     while (count < maxDevices && oneWireBus.search(addr)) {
@@ -697,8 +699,9 @@ int discoverOneWireDevices(DeviceAddress deviceAddresses[], int maxDevices) {
         count++;
     }
 
-    Serial.println("Found " + String(count) + " devices.");
-    Serial.println("");
+    if (count == 0) {
+        Serial.println("There is no 1-Wire devices...");
+    }
 
     oneWireBus.reset_search();
 
@@ -929,15 +932,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
  */
 void doHttpUpdate() {
     String updateUrl = "/firmware/update/" + String(DEVICE_KEY) + "/" + String(VERSION);
-    Serial.println("Update URL: " + updateUrl);
 
     int contentLength = 0;
     bool isValidContentType = false;
-    
-    Serial.println("Connecting to: " + String(IOT_BASE_HOST));
     if (updateClient.connect(IOT_BASE_HOST, 80)) {
-        Serial.println("Fetching firmware: " + String(updateUrl));
-
         updateClient.print(String("GET ") + updateUrl + " HTTP/1.1\r\n" +
                 "Host: " + IOT_BASE_HOST + "\r\n" +
                 "Cache-Control: no-cache\r\n" +
@@ -986,8 +984,6 @@ void doHttpUpdate() {
     }
 
     if (!contentLength || !isValidContentType) {
-        Serial.println("contentLength: " + String(contentLength) + ", isValidContentType: " + String(isValidContentType));
-        Serial.println("There is no right content in the response... giving up.");
         updateClient.stop();
         return;
     }
@@ -1036,14 +1032,19 @@ void checkForUpdate() {
 
     http.begin("http://" + String(IOT_BASE_HOST) + "/firmware/check/" + DEVICE_KEY + "/" + String(VERSION) + "/" + WiFi.localIP().toString());
     int code = http.GET();
-    Serial.println("Checking for new firmware: " + String(code));
     http.end();
+
+    Serial.println();
+    Serial.println("Checking for new firmware: " + String(code));
 
     if (code == 200) {
         ESP.restart();
     }
 }
 
+/**
+ * Returns with the value of the header.
+ */
 String getHeaderValue(String header, String headerName) {
     return header.substring(strlen(headerName.c_str()));
 }
