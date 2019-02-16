@@ -6,3 +6,4 @@
 #define AP2_PASSWORD   "pass3"
 
 #define IOT_BASE_HOST  "api.iothub.live"
+#define IOT_USER_ID    "lL090xDnGTVMpv9BRAgR6A"
