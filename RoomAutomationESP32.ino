@@ -21,14 +21,14 @@ extern "C" int rom_phy_get_vdd33();
 
 #include <TimeLib.h>
 
-#define VERSION        "esp32-0.2.0-2"
+#define VERSION        "esp32-0.2.0-6"
 
 #define MAX_OW_DEVICES 10
 
 #define PWM_CHANNEL    0
 #define PWM_RESOLUTION 9
 #define PWM_MAX_VALUE  512
-#define PWM_MAX_FREQ   32768
+#define PWM_MAX_FREQ   1024
 
 #define D0             26
 
@@ -65,6 +65,7 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
  */
 String resetReason = "unknown";
 String MAC_ADDRESS;
+String NODE_ID;
 String DEVICE_ID;
 String DEVICE_KEY;
 
@@ -173,7 +174,7 @@ void IRAM_ATTR updatePWM() {
         } else if (pwmCurrentPower >= PWM_MAX_VALUE) {
             ledcWrite(PWM_CHANNEL, PWM_MAX_VALUE);
         } else {
-            ledcWrite(PWM_CHANNEL, pwmCurrentPower);
+            ledcWrite(PWM_CHANNEL, pwmBrightnessLookup[pwmCurrentPower]);
         }
         portEXIT_CRITICAL_ISR(&timerMux);  
 
@@ -277,7 +278,7 @@ void setup(){
      * Query runtime parameters from the static parameter map.
      */
     for(int i = 0; i < NUMBER_OF_DEVICES; i++) {
-        if (MAC_ADDRESS.equals(deviceParametersMap[i].name)) {
+        if (MAC_ADDRESS.equals(deviceParametersMap[i].mac)) {
             DEVICE_ID = deviceParametersMap[i].deviceId;
             DEVICE_KEY = deviceParametersMap[i].deviceKey;
 
@@ -516,7 +517,11 @@ void handleSensors() {
         http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/vcc/" + vcc);
         Serial.println("Status code of 'vcc': " + String(http.GET()));
         http.end();
-    }
+
+        http.begin("http://" + String(IOT_BASE_HOST) + "/measurement/create/" + NODE_KEY + "/uptime/" + String(millis()));
+        Serial.println("Status code of 'uptime': " + String(http.GET()));
+        http.end();
+    }    
 
     /**
      * Initiate the DS20B18 sensors.
@@ -659,7 +664,7 @@ float getTemperature(DeviceAddress address) {
  */
 String nodeKeyByDeviceId() {
     for(int i = 0; i < NUMBER_OF_NODES; i++) {
-        if (MAC_ADDRESS.equals(nodeParametersMap[i].name)) {
+        if (MAC_ADDRESS.equals(nodeParametersMap[i].mac)) {
           return nodeParametersMap[i].nodeKey;
         }
     }
@@ -672,7 +677,7 @@ String nodeKeyByDeviceId() {
  */
 String nodeKeyByAddress(String address) {
     for(int i = 0; i < NUMBER_OF_NODES; i++) {
-        if (address.equals(nodeParametersMap[i].name)) {
+        if (address.equals(nodeParametersMap[i].mac)) {
           return nodeParametersMap[i].nodeKey;
         }
     }
@@ -875,14 +880,12 @@ void mqttConnect() {
        return;
     }
 
-    Serial.println("MQTT clientId: " + MAC_ADDRESS);
+    Serial.println("MQTT clientId: " + DEVICE_ID);
     mqttClient.setServer(mqttServer, 1883);
     mqttClient.setCallback(mqttCallback);
 
-    if (mqttClient.connect(MAC_ADDRESS.c_str(), mqttUsername, mqttPassword)) {      
-        String nodeKey = nodeKeyByDeviceId();
-        String field = "led";
-        String topic = String("sub/" + nodeKey + "/" + field);
+    if (mqttClient.connect(DEVICE_ID.c_str(), IOT_USER_ID, DEVICE_KEY.c_str())) {
+        String topic = String("sub/" + String(IOT_USER_ID) + "/" + DEVICE_ID + "/#");
       
         mqttClient.subscribe(topic.c_str());
       
@@ -924,6 +927,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     
     String payloadString = String(payloadChars);
     pwmTargetPower = payloadString.toInt();
+    Serial.println("PWM target power: " + String(pwmTargetPower));
     pirLastChange = millis();
 }
 
