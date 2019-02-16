@@ -1,10 +1,11 @@
 /**
  * Device parameters.
  */
-#define NUMBER_OF_DEVICES 1
+#define NUMBER_OF_DEVICES 2
 
 typedef struct {
-     String name;
+     String mac;
+     
      String deviceId;
      String deviceKey;
 
@@ -13,7 +14,8 @@ typedef struct {
 } deviceParameters;
 
 deviceParameters deviceParametersMap[NUMBER_OF_DEVICES] = {
-    {"807d3af47180", "0156db30-2bc2-11e9-9af5-8b2a4a431cbf", "xxxxxxxxxxxxxxxxxxxxxx", 1, 1}, // ESP32
+    {"807d3af47180", "okB7yhDlvVth6_UQRscR6A", "xxxxxxxxxxxxxxxxxxxxxx", 1, 1}, // Bedroom
+    {"30aea40eb638", "mvWLKkpDHL8BVtswK8IR6Q", "xxxxxxxxxxxxxxxxxxxxxx", 1, 1} // ESP32 test
 };
 
 /**
@@ -22,13 +24,14 @@ deviceParameters deviceParametersMap[NUMBER_OF_DEVICES] = {
 #define NUMBER_OF_NODES 2
 
 typedef struct {
-     String name;
+     String mac;
+     
+     String deviceId;
      String nodeId;
      String nodeKey;
-     String deviceId;
 } nodeParameters;
 
 nodeParameters nodeParametersMap[NUMBER_OF_NODES] = {
-    {"28ffb50d5916049a", "8d8faf70-2bc0-11e9-882b-d11ec1ee8d2a", "xxxxxxxxxxxxxxxxxxxxxx", "0156db30-2bc2-11e9-9af5-8b2a4a431cbf"}, // ESP32 DS18B20
-    {"807d3af47180",     "8d8faf70-2bc0-11e9-882b-d11ec1ee8d2a", "xxxxxxxxxxxxxxxxxxxxxx", "0156db30-2bc2-11e9-9af5-8b2a4a431cbf"}, // ESP32 MAC
+    {"807d3af47180",     "okB7yhDlvVth6_UQRscR6A", "gy8rYTk1GxsVwo8QAMwR5w", "xxxxxxxxxxxxxxxxxxxxxx"}, // Bedroom sensors
+    {"30aea40eb638",     "mvWLKkpDHL8BVtswK8IR6Q", "iCvRHsHujSqNj69wK8AR6Q", "xxxxxxxxxxxxxxxxxxxxxx"}, // ESP32 test
 };
