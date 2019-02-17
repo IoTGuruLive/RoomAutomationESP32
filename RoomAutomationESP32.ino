@@ -21,7 +21,7 @@ extern "C" int rom_phy_get_vdd33();
 
 #include <TimeLib.h>
 
-#define VERSION        "esp32-0.2.0-6"
+#define VERSION        "esp32-0.2.0-9"
 
 #define MAX_OW_DEVICES 10
 
@@ -77,6 +77,8 @@ volatile int pwmEnabled = 0;
 volatile int pwmBrightnessLookup[PWM_MAX_VALUE + 1];
 volatile int pwmMaxPower = PWM_MAX_VALUE;
 volatile int pwmCurrentPower = 0;
+volatile int pwmChanging = 0;
+volatile int pwmLastChanged = 0;
 volatile int pwmTargetPower = -1;
 volatile int pwmPrevTargetPower = -1;
 
@@ -159,49 +161,8 @@ PubSubClient mqttClient(wifiClient);
  * PWM updater timer method.
  */
 void IRAM_ATTR updatePWM() {
-
     if (pwmEnabled) {
-        portENTER_CRITICAL_ISR(&timerMux);
-        if (pwmTargetPower > pwmCurrentPower) {
-            pwmCurrentPower += 1;
-        }
-        if (pwmTargetPower < pwmCurrentPower) {
-            pwmCurrentPower -= 1;
-        }
-
-        if (pwmCurrentPower <= 0) {
-            ledcWrite(PWM_CHANNEL, 0);
-        } else if (pwmCurrentPower >= PWM_MAX_VALUE) {
-            ledcWrite(PWM_CHANNEL, PWM_MAX_VALUE);
-        } else {
-            ledcWrite(PWM_CHANNEL, pwmBrightnessLookup[pwmCurrentPower]);
-        }
-        portEXIT_CRITICAL_ISR(&timerMux);  
-
-        if (pwmTargetPower != -1) {
-            if (pirState == 1) {
-              pwmTargetPower = pwmPrevTargetPower;
-            } else {
-                if (pirLastChange + pirSwitchDuration < millis() && pwmTargetPower > pwmPrevTargetPower / 4 * 3) {
-                    pwmPrevTargetPower = pwmTargetPower;
-                    pwmTargetPower = pwmPrevTargetPower / 4 * 3;
-                } else if (pirLastChange + pirSwitchDuration * 2 < millis()) {
-                  pwmTargetPower = -1;
-                  pwmPrevTargetPower = -1;
-                  switchDirection = 0;
-                  digitalWrite(PIN_RELAY, LOW);
-                }
-            }
-        }
-
-        switchState = digitalRead(PIN_SWITCH);
-        if (switchState == switchSavedState && switchLastReceived > millis()) {
-            return;
-        }
-
-        if (switchState != switchSavedState) {
-            switchLastReceived = millis() + 50;
-            switchSavedState = switchState;
+        if (switchLastReceived + 50 > millis()) {
             return;
         }
 
@@ -226,7 +187,7 @@ void IRAM_ATTR updatePWM() {
                     }
                 }
             }
-            
+
             return;
         }
 
@@ -333,13 +294,14 @@ void setup(){
      */
     pinMode(PIN_RELAY, OUTPUT);  // Relay
     pinMode(PIN_SDA, INPUT);     // BME280 SDA
-    pinMode(PIN_SWITCH, INPUT);  // Switch
+    pinMode(PIN_SWITCH, INPUT_PULLUP);  // Switch
     pinMode(PIN_PIR, INPUT);     // PIR
     pinMode(PIN_SCL, INPUT);     // BME280 SCL
     pinMode(PIN_POWER, OUTPUT);  // BME280 power
     
     digitalWrite(PIN_POWER, HIGH);
     attachInterrupt(PIN_PIR, handlePirPin, CHANGE);
+    attachInterrupt(PIN_SWITCH, handleSwitchPin, CHANGE);
 
     hw_timer_t * timer = timerBegin(0, 80, true);
     timerAttachInterrupt(timer, &updatePWM, true);
@@ -462,13 +424,59 @@ void wifiConnect(char* ssid, char* password) {
  * Periodically check things... :)
  */
 void loop(){
+    if (pwmEnabled) {
+        if (pwmLastChanged + 5 > millis()) {
+            return;
+        }
+      
+        if (pwmTargetPower > pwmCurrentPower) {
+            pwmCurrentPower += 1;
+            pwmChanging = 1;
+        } else if (pwmTargetPower < pwmCurrentPower) {
+            pwmCurrentPower -= 1;
+            pwmChanging = 1;
+        } else {
+            pwmChanging = 0;
+        }
+
+        if (pwmChanging) {
+            pwmLastChanged = millis();
+
+            if (pwmCurrentPower <= 0) {
+                ledcWrite(PWM_CHANNEL, 0);
+            } else if (pwmCurrentPower >= PWM_MAX_VALUE) {
+                ledcWrite(PWM_CHANNEL, PWM_MAX_VALUE);
+            } else {
+                ledcWrite(PWM_CHANNEL, pwmBrightnessLookup[pwmCurrentPower]);
+            }
+
+            return;
+        }
+
+        if (pwmTargetPower >= 0) {
+            if (pirState == 1) {
+                pwmTargetPower = pwmPrevTargetPower;
+            } else {
+                if (pirLastChange + pirSwitchDuration < millis() && pwmTargetPower > pwmPrevTargetPower / 4 * 3) {
+                    pwmPrevTargetPower = pwmTargetPower;
+                    pwmTargetPower = pwmPrevTargetPower / 4 * 3;
+                } else if (pirLastChange + pirSwitchDuration * 2 < millis()) {
+                  pwmTargetPower = -1;
+                  pwmPrevTargetPower = -1;
+                  switchDirection = 0;
+                  digitalWrite(PIN_RELAY, LOW);
+                }
+            }
+        }
+    }
+
     wifiConnect();
     handleSensors();
     handleNtpPacket();
     server.handleClient();    
     handleMQTT();
     checkForUpdate();
-    
+
     delay(1);
 }
 
@@ -478,13 +486,28 @@ void loop(){
 void handlePirPin() {
     if (pwmEnabled) {
         int pin = digitalRead(PIN_PIR);
-
         if (pin == HIGH && pirState == LOW) {
             pirLastChange = millis();
             pirState = HIGH;
         } else if (pin == LOW && pirState == HIGH) {
             pirLastChange = millis();
             pirState = LOW;
+        }
+    }
+}
+
+/**
+ * Handle the switch input.
+ */
+void handleSwitchPin() {
+    if (pwmEnabled) {
+        int pin = digitalRead(PIN_SWITCH);
+        if (pin == HIGH && switchState == LOW) {
+            switchLastReceived = millis();
+            switchState = HIGH;
+        } else if (pin == LOW && switchState == HIGH) {
+            switchLastReceived = millis();
+            switchState = LOW;
         }
     }
 }
@@ -927,6 +950,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     
     String payloadString = String(payloadChars);
     pwmTargetPower = payloadString.toInt();
+    pwmPrevTargetPower = pwmTargetPower;
+    pirLastChange = millis();
+    switchDirection = 1;
     Serial.println("PWM target power: " + String(pwmTargetPower));
     pirLastChange = millis();
 }
