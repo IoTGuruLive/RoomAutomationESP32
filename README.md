@@ -19,4 +19,4 @@
 
 # Schema
 
-![Schema](https://github.com/IoTGuruLive/RoomAutomationESP32/blob/master/images/scheme.jpg)
+![Schema](https://github.com/IoTGuruLive/RoomAutomationESP32/blob/master/images/schema.jpg)
