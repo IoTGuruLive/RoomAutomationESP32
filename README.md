@@ -2,6 +2,8 @@
 * Room automation with ESP32 in Arduino language
 * Cloud support: https://iotguru.live
 
+![Device](https://github.com/gaborauth/RoomAutomation/blob/master/images/device.jpg)
+
 # Features
 
 * PWM output (adjustable steps and frequency) with fade-in, fade-out or fade-to (= LED strip control)
