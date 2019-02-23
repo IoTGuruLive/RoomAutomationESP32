@@ -2,7 +2,8 @@
 * Room automation with ESP32 in Arduino language
 * Cloud support: https://iotguru.live
 
-![Device](https://github.com/gaborauth/RoomAutomationESP32/blob/master/images/device.jpg)
+![Device](https://github.com/IoTGuruLive/RoomAutomationESP32/blob/master/images/device.jpg)
+          
 
 # Features
 
@@ -18,4 +19,4 @@
 
 # Schema
 
-![Schema](https://github.com/gaborauth/RoomAutomationESP32/blob/master/images/schema.jpg)
+![Schema](https://github.com/IoTGuruLive/RoomAutomationESP32/blob/master/images/scheme.jpg)
